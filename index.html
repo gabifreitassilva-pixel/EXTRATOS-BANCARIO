@@ -1173,6 +1173,19 @@
         </div>
     </div>
 
+    <!-- MODAL DE CONFIRMAÇÃO PERSONALIZADO (Substitui o confirm() bloqueado no ambiente de iFrames/Visualizador) -->
+    <div class="modal-overlay" id="modalConfirmacao" style="z-index: 1200;">
+        <div class="modal-box" style="width: 420px; text-align: center; padding: 30px 25px; border-radius: 24px;">
+            <div style="font-size: 48px; margin-bottom: 15px;" id="confirmIcon">⚠️</div>
+            <h3 style="color: #2e1065; font-weight: 800; font-size: 22px; margin-bottom: 12px;" id="confirmTitle">Confirmar Ação</h3>
+            <p style="color: #64748b; font-size: 14px; line-height: 1.5; margin-bottom: 25px;" id="confirmDescription">Tem a certeza que deseja prosseguir?</p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button class="btn-secondary" style="border: none; background: #e2e8f0; color: #475569; padding: 10px 22px; border-radius: 20px;" onclick="fecharConfirmacao(false)">Cancelar</button>
+                <button class="btn-primary" style="padding: 10px 25px; border-radius: 20px;" id="btnConfirmarAcao">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST NOTIFICATION -->
     <div id="toast" class="toast-notification"></div>
 
@@ -1221,6 +1234,7 @@
         let currentEditingModeloId = null; 
         let currentEditingClientId = null; 
         let clientPendingCadastroId = null;
+        let acaoConfirmadaCallback = null; // Callback para o modal de confirmação personalizado
 
         // --- CARREGAMENTO INICIAL ULTRARRÁPIDO LOCAL (PREVENTIVO CONTRA LATÊNCIAS) ---
         try {
@@ -1334,6 +1348,32 @@
             link.click();
             document.body.removeChild(link);
             window.showToast("Dados exportados para Excel com sucesso!");
+        };
+
+        // ================= SISTEMA DE CONFIRMAÇÃO PERSONALIZADO (Substitui confirm() bloqueado no iFrame) =================
+        window.mostrarConfirmacaoCustom = function(titulo, descricao, icone, callback, corBotao = "#7c3aed") {
+            document.getElementById('confirmTitle').innerText = titulo;
+            document.getElementById('confirmDescription').innerText = descricao;
+            document.getElementById('confirmIcon').innerText = icone;
+            
+            const btnConfirmar = document.getElementById('btnConfirmarAcao');
+            btnConfirmar.style.background = corBotao;
+            
+            acaoConfirmadaCallback = callback;
+            window.openModal('modalConfirmacao');
+        };
+
+        window.fecharConfirmacao = function(confirmado) {
+            window.closeModal('modalConfirmacao');
+            if (confirmado && acaoConfirmadaCallback) {
+                acaoConfirmadaCallback();
+            }
+            acaoConfirmadaCallback = null;
+        };
+
+        // Associa clique do botão de confirmação
+        document.getElementById('btnConfirmarAcao').onclick = function() {
+            window.fecharConfirmacao(true);
         };
 
         // Controle Global de Modais
@@ -1613,15 +1653,22 @@
             }
         };
 
-        window.excluirModelo = async function(id) {
-            if(confirm('Tem certeza que deseja excluir este modelo de comunicado?')) {
-                try {
-                    await db.collection('artifacts/' + appId + '/public/data/modelos').doc(id).delete();
-                    window.showToast('Modelo removido com sucesso.', 'error');
-                } catch (error) {
-                    console.error("Erro ao excluir modelo:", error);
-                }
-            }
+        // Excluir Modelo com diálogo personalizado
+        window.excluirModelo = function(id) {
+            window.mostrarConfirmacaoCustom(
+                'Remover Modelo',
+                'Tem a certeza absoluta de que deseja excluir este modelo de comunicado permanentemente?',
+                '🗑️',
+                async () => {
+                    try {
+                        await db.collection('artifacts/' + appId + '/public/data/modelos').doc(id).delete();
+                        window.showToast('Modelo removido com sucesso.', 'error');
+                    } catch (error) {
+                        console.error("Erro ao excluir modelo:", error);
+                    }
+                },
+                "#dc2626"
+            );
         };
 
         // ================= IMPORTAÇÕES E CRIAÇÃO DE CLIENTES =================
@@ -2000,21 +2047,30 @@
             }
         };
 
-        // Excluir cliente de forma segura do Firestore
-        window.excluirCliente = async function(id) {
-            if(confirm('Tem certeza que deseja remover este cliente permanentemente?')) {
-                try {
-                    clientes = clientes.filter(c => c.id !== id);
-                    atualizarUI();
+        // Excluir cliente de forma segura do Firestore (Usando modal de confirmação personalizado)
+        window.excluirCliente = function(id) {
+            window.mostrarConfirmacaoCustom(
+                'Remover Cliente',
+                'Tem a certeza de que deseja remover este cliente permanentemente da base de dados na nuvem?',
+                '🗑️',
+                async () => {
+                    try {
+                        // Remove localmente primeiro
+                        clientes = clientes.filter(c => c.id !== id);
+                        atualizarUI();
 
-                    if (!id.toString().startsWith('temp_')) {
-                        await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).delete();
-                        window.showToast('Cliente removido com sucesso.', 'error');
+                        // Sincroniza exclusão na nuvem
+                        if (!id.toString().startsWith('temp_')) {
+                            await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).delete();
+                        }
+                        window.showToast('Cliente removido com sucesso.', 'success');
+                    } catch (error) {
+                        console.error("Erro ao deletar cliente:", error);
+                        window.showToast("Erro ao tentar remover o cliente da nuvem.", "error");
                     }
-                } catch (error) {
-                    console.error("Erro ao deletar cliente:", error);
-                }
-            }
+                },
+                "#ef4444"
+            );
         };
 
         // ================= FLUXO DE SEGURANÇA E VALIDAÇÕES DO WHATSAPP =================
@@ -2288,22 +2344,28 @@
         };
 
         // Apagar todos os registos locais para recomeçar do zero na nuvem
-        window.apagarTodaBase = async function() {
-            if(confirm('ATENÇÃO EXTREMA! Esta ação removerá TODOS os clientes registados da nuvem compartilhada. Deseja prosseguir?')) {
-                try {
-                    for (const cli of clientes) {
-                        if (!cli.id.toString().startsWith('temp_')) {
-                            await db.collection('artifacts/' + appId + '/public/data/clientes').doc(cli.id).delete();
+        window.apagarTodaBase = function() {
+            window.mostrarConfirmacaoCustom(
+                'ATENÇÃO EXTREMA!',
+                'Esta ação removerá TODOS os clientes registados da nuvem de forma permanentemente e irreversível. Deseja mesmo prosseguir?',
+                '⚠️',
+                async () => {
+                    try {
+                        for (const cli of clientes) {
+                            if (!cli.id.toString().startsWith('temp_')) {
+                                await db.collection('artifacts/' + appId + '/public/data/clientes').doc(cli.id).delete();
+                            }
                         }
+                        clientes = [];
+                        atualizarUI();
+                        window.toggleSlidePanel(false);
+                        window.showToast('Toda a base de clientes do Firestore foi excluída!', 'error');
+                    } catch (error) {
+                        console.error("Erro ao limpar base de dados:", error);
                     }
-                    clientes = [];
-                    atualizarUI();
-                    window.toggleSlidePanel(false);
-                    window.showToast('Toda a base de clientes do Firestore foi excluída!', 'error');
-                } catch (error) {
-                    console.error("Erro ao limpar base de dados:", error);
-                }
-            }
+                },
+                "#dc2626"
+            );
         };
     </script>
 </body>
