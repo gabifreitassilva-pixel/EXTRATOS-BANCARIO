@@ -1905,15 +1905,14 @@
             let ignoradosDuplicados = 0;
 
             try {
-                for (const linha of linhas) {
-                    if(!linha.trim()) continue;
+                for (const inline of linhas) {
+                    if(!inline.trim()) continue;
 
                     const cnpjRegex = /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})|(\d{14})/;
-                    // Correção preventiva para usar de forma consistente a variável declarada 'linha'
-                    const matchCnpj = linha.match(cnpjRegex);
+                    const matchCnpj = inline.match(cnpjRegex);
                     
                     let cnpj = matchCnpj ? matchCnpj[0] : "CNPJ não localizado";
-                    let razao = linha.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
+                    let razao = inline.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
                     
                     if (razao.length < 3) {
                         razao = "Empresa Importada #" + (clientes.length + 1);
@@ -2375,10 +2374,17 @@
             
             checkboxes.forEach(chk => {
                 const mes = chk.value;
+                const estadoAnterior = cli.statusMeses ? cli.statusMeses[mes] : "Pendente";
+                
                 if (chk.checked) {
                     statusMesesNovos[mes] = "Recebido";
                 } else {
-                    statusMesesNovos[mes] = "Pendente";
+                    // SE DESMARCADO: se antes estava Cobrado (Roxo), mantém como Cobrado (Roxo). Caso contrário, fica Pendente (Cinza)
+                    if (estadoAnterior === "Cobrado") {
+                        statusMesesNovos[mes] = "Cobrado";
+                    } else {
+                        statusMesesNovos[mes] = "Pendente";
+                    }
                 }
             });
 
