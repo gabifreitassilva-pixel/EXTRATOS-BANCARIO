@@ -716,41 +716,12 @@
         }
         .btn-undo:hover { background: #fee2e2; }
 
-        /* Grade de seleção de meses interativa */
-        .months-selector-container {
-            background: #faf5ff;
-            border: 1px solid #e9d5ff;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .months-grid {
+        /* Grelha de Meses estruturada em formato 6x2 (Opção 2) */
+        .months-ggrid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .month-chip {
-            background: white;
-            border: 1px solid #d8b4fe;
-            border-radius: 10px;
-            padding: 8px;
-            text-align: center;
-            font-size: 13px;
-            font-weight: 700;
-            color: #6b21a8;
-            cursor: pointer;
-            transition: all 0.2s;
-            user-select: none;
-        }
-
-        .month-chip.selected {
-            background: #7c3aed;
-            color: white;
-            border-color: #7c3aed;
-            box-shadow: 0 4px 10px rgba(124, 58, 237, 0.2);
+            grid-template-columns: repeat(6, 1fr);
+            gap: 4px;
+            width: 200px;
         }
 
         /* Caixa de Visualização da Mensagem Real */
@@ -1176,7 +1147,7 @@
         </div>
     </div>
 
-    <!-- MODAL DE BAIXA MULTI-MESES -->
+    <!-- MODAL DE BAIXA MULTI-MESES / SELECÇÃO DE BAIXA (OPÇÃO 2 ATIVA) -->
     <div class="modal-overlay" id="modalBaixaMultiMeses" style="z-index: 1080;">
         <div class="modal-box" style="width: 500px;">
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
@@ -1219,8 +1190,10 @@
                 <button class="close-panel-btn" onclick="closeModal('modalHistorico')" style="font-size: 24px;">✕</button>
             </div>
             
-            <div class="form-group" style="margin-bottom: 15px;">
-                <input type="text" id="historicoSearch" class="form-control" placeholder="Filtrar por Empresa, Operador ou Ação..." oninput="filtrarHistoricoInterno()">
+            <div class="form-group" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+                <input type="text" id="historicoSearch" class="form-control" placeholder="Filtrar por Empresa, Operador ou Ação..." oninput="filtrarHistoricoInterno()" style="flex: 1;">
+                <button class="btn-export" onclick="imprimirHistorico()" style="height: 42px;">📄 PDF / Imprimir</button>
+                <button class="btn-export" onclick="exportarHistoricoExcel()" style="height: 42px;">📥 Excel</button>
             </div>
 
             <div style="max-height: 400px; overflow-y: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px;" id="historicoListaContainer">
@@ -1299,6 +1272,7 @@
 
         // Meses do Ano mapeados
         const MESES_ANO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+        const MESES_ABREV = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"];
         
         // Inicializador padrão para estado individual de cada mês
         const obterStatusMesesDefault = () => {
@@ -1443,9 +1417,100 @@
             window.showToast("Dados exportados para Excel com sucesso!");
         };
 
+        // ================= IMPRESSÃO E EXPORTAÇÃO EXCEL DO HISTÓRICO GLOBAL =================
+        window.imprimirHistorico = function() {
+            const filterText = document.getElementById('historicoSearch').value.toUpperCase();
+            let filtrados = historicos;
+            if (filterText) {
+                filtrados = historicos.filter(log => {
+                    const empresa = log.empresa ? log.empresa.toUpperCase() : "";
+                    const operador = log.operador ? log.operador.toUpperCase() : "";
+                    const acao = log.acao ? log.acao.toUpperCase() : "";
+                    const detalhes = log.detalhes ? log.detalhes.toUpperCase() : "";
+                    return empresa.includes(filterText) || operador.includes(filterText) || acao.includes(filterText) || detalhes.includes(filterText);
+                });
+            }
+            
+            const printWindow = window.open('', '_blank');
+            let html = `<html><head><title>Histórico de Movimentações</title>`;
+            html += `<style>
+                body { font-family: 'Nunito', sans-serif; padding: 20px; color: #334155; }
+                h2 { color: #2e1065; text-align: center; margin-bottom: 25px; }
+                .item { border-bottom: 1px solid #e2e8f0; padding: 15px 0; }
+                .meta { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 5px; }
+                .action { font-weight: bold; color: #7c3aed; }
+                .details { font-size: 13px; color: #475569; background: #f8fafc; padding: 10px; border-radius: 6px; }
+            </style></head><body>`;
+            html += `<h2>Relatório de Histórico de Movimentações</h2>`;
+            
+            filtrados.forEach(log => {
+                html += `
+                <div class="item">
+                    <div class="meta">
+                        <strong>${log.empresa}</strong>
+                        <span>${log.dataHora}</span>
+                    </div>
+                    <div style="margin-bottom: 5px; font-size: 13px;">
+                        Ação: <span class="action">${log.acao}</span> | Operador: <strong>${log.operador}</strong>
+                    </div>
+                    <div class="details">${log.detalhes}</div>
+                </div>`;
+            });
+            html += `</body></html>`;
+            printWindow.document.write(html);
+            printWindow.document.close();
+            printWindow.focus();
+            setTimeout(() => {
+                printWindow.print();
+                printWindow.close();
+            }, 500);
+        };
+
+        window.exportarHistoricoExcel = function() {
+            if (historicos.length === 0) {
+                window.showToast("Nenhum histórico para exportar!", "error");
+                return;
+            }
+            const filterText = document.getElementById('historicoSearch').value.toUpperCase();
+            let filtrados = historicos;
+            if (filterText) {
+                filtrados = historicos.filter(log => {
+                    const empresa = log.empresa ? log.empresa.toUpperCase() : "";
+                    const operador = log.operador ? log.operador.toUpperCase() : "";
+                    const acao = log.acao ? log.acao.toUpperCase() : "";
+                    const detalhes = log.detalhes ? log.detalhes.toUpperCase() : "";
+                    return empresa.includes(filterText) || operador.includes(filterText) || acao.includes(filterText) || detalhes.includes(filterText);
+                });
+            }
+
+            let csvContent = "\uFEFF"; // UTF-8 BOM
+            csvContent += "Data/Hora;Empresa;Ação;Operador;Detalhes\r\n";
+            
+            filtrados.forEach(log => {
+                const dataHora = log.dataHora ? log.dataHora.replace(/"/g, '""') : "";
+                const empresa = log.empresa ? log.empresa.replace(/"/g, '""') : "";
+                const acao = log.acao ? log.acao.replace(/"/g, '""') : "";
+                const operador = log.operador ? log.operador.replace(/"/g, '""') : "";
+                const detalhes = log.detalhes ? log.detalhes.replace(/"/g, '""') : "";
+                
+                csvContent += `"${dataHora}";"${empresa}";"${acao}";"${operador}";"${detalhes}"\r\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "historico_movimentacoes.csv");
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.showToast("Histórico exportado para Excel com sucesso!");
+        };
+
         // ================= SISTEMA DE CONFIRMAÇÃO PERSONALIZADO (Substitui confirm() bloqueado no iFrame) =================
         window.mostrarConfirmacaoCustom = function(titulo, descricao, icone, callback, corBotao = "#7c3aed") {
-            document.getElementById('confirmTitle').innerText = titulo;
+            document.getElementById('confirmTitle').innerText = title || "Confirmar";
             document.getElementById('confirmDescription').innerText = descricao;
             document.getElementById('confirmIcon').innerText = icone;
             
@@ -1605,7 +1670,7 @@
             const user = auth.currentUser;
             if (!user) return;
 
-            // Escuta Clientes em Tempo Real (Base Limpa de Origem sem mocks automáticos)
+            // Escuta Clientes em Tempo Real (Base Limpa de Origem sem mocks automáticos nem loops ao esvaziar)
             db.collection('artifacts/' + appId + '/public/data/clientes').onSnapshot((snapshot) => {
                 let tempClientes = [];
                 snapshot.forEach((doc) => {
@@ -1763,6 +1828,7 @@
             }
         };
 
+        // Excluir Modelo com diálogo personalizado
         window.excluirModelo = function(id) {
             window.mostrarConfirmacaoCustom(
                 'Remover Modelo',
@@ -1794,14 +1860,14 @@
             let ignoradosDuplicados = 0;
 
             try {
-                for (const inline of linhas) {
-                    if(!inline.trim()) continue;
+                for (const linha of linhas) {
+                    if(!linha.trim()) continue;
 
                     const cnpjRegex = /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})|(\d{14})/;
-                    const matchCnpj = inline.match(cnpjRegex);
+                    const matchCnpj = linha.match(cnpjRegex);
                     
                     let cnpj = matchCnpj ? matchCnpj[0] : "CNPJ não localizado";
-                    let razao = inline.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
+                    let razao = linha.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
                     
                     if (razao.length < 3) {
                         razao = "Empresa Importada #" + (clientes.length + 1);
@@ -1997,9 +2063,17 @@
                 localStorage.setItem('gestao_extratos_clientes', JSON.stringify(clientes));
             } catch(e){}
 
-            let clientesFiltrados = clientes;
+            let clientesFiltrados = [...clientes];
+            
+            // --- ORDENAR DADOS ALFABETICAMENTE PELA RAZÃO SOCIAL ---
+            clientesFiltrados.sort((a, b) => {
+                const razaoA = (a.razao || "").trim().toUpperCase();
+                const razaoB = (b.razao || "").trim().toUpperCase();
+                return razaoA.localeCompare(razaoB, 'pt-BR');
+            });
+
             if (currentFilterStatus !== 'TODOS') {
-                clientesFiltrados = clientes.filter(c => c.status === currentFilterStatus);
+                clientesFiltrados = clientesFiltrados.filter(c => c.status === currentFilterStatus);
             }
 
             document.getElementById('countBtnTag').innerText = clientes.length;
@@ -2041,15 +2115,10 @@
                         historicoCobranca += `<br><span style="color: #059669; font-size:11px; font-weight:700;">Baixado: ${cli.ultimaBaixa}</span>`;
                     }
 
-                    // --- CONSTRUÇÃO DA GRELHA VISUAL DE 12 MESES (OPÇÃO 2) ---
+                    // --- CONSTRUÇÃO DA GRELHA VISUAL DE 12 MESES EM LAYOUT 6x2 (OPÇÃO 2) ---
                     const statusMeses = cli.statusMeses || obterStatusMesesDefault();
-                    const iniciaisMeses = {
-                        "Janeiro": "J", "Fevereiro": "F", "Março": "M", "Abril": "A", "Maio": "M", "Junho": "J",
-                        "Julho": "J", "Agosto": "A", "Setembro": "S", "Outubro": "O", "Novembro": "N", "Dezembro": "D"
-                    };
-
-                    let grelhaMesesHtml = '<div style="display: flex; gap: 4px; flex-wrap: wrap; max-width: 170px;">';
-                    MESES_ANO.forEach(m => {
+                    let grelhaMesesHtml = '<div class="months-ggrid">';
+                    MESES_ANO.forEach((m, idx) => {
                         const estadoMes = statusMeses[m] || "Pendente";
                         let styleDot = "background: #f1f5f9; color: #94a3b8; border: 1px solid #e2e8f0;"; // Cinza / Pendente
                         
@@ -2059,7 +2128,8 @@
                             styleDot = "background: #34d399; color: white; border: 1px solid #10b981;"; // Verde / Recebido
                         }
 
-                        grelhaMesesHtml += `<span style="width: 19px; height: 19px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 800; ${styleDot}" title="${m}: ${estadoMes}">${iniciaisMeses[m]}</span>`;
+                        const abrev = MESES_ABREV[idx];
+                        grelhaMesesHtml += `<span style="padding: 2px 0; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 800; ${styleDot}" title="${m}: ${estadoMes}">${abrev}</span>`;
                     });
                     grelhaMesesHtml += '</div>';
 
@@ -2104,11 +2174,21 @@
                 });
             }
 
-            panelClientsList.innerHTML = '';
-            if(clientes.length === 0) {
-                panelClientsList.innerHTML = '<div style="color: #94a3b8; font-weight: 600; font-size: 14px; text-align: center; padding: 40px 0;">Nenhum cliente registado na base de dados.</div>';
+            // Renderizar base de dados interna no painel lateral
+            const panelClientesList = document.getElementById('panelClientsList');
+            panelClientesList.innerHTML = '';
+            
+            // Ordenar alfabeticamente também a listagem do painel lateral
+            const clientesOrdenadosPainel = [...clientes].sort((a, b) => {
+                const razaoA = (a.razao || "").trim().toUpperCase();
+                const razaoB = (b.razao || "").trim().toUpperCase();
+                return razaoA.localeCompare(razaoB, 'pt-BR');
+            });
+
+            if(clientesOrdenadosPainel.length === 0) {
+                panelClientesList.innerHTML = '<div style="color: #94a3b8; font-weight: 600; font-size: 14px; text-align: center; padding: 40px 0;">Nenhum cliente registado na base de dados.</div>';
             } else {
-                clientes.forEach(cli => {
+                clientesOrdenadosPainel.forEach(cli => {
                     const item = document.createElement('div');
                     item.style = 'background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 10px; margin-bottom: 10px; font-size: 13px; position: relative;';
                     item.innerHTML = `
@@ -2125,35 +2205,147 @@
             }
         };
 
-        // Dar baixa / Marcar como recebido com histórico de operador
+        // --- SISTEMA INTELIGENTE DE CONFIRMAÇÃO DE COBRANÇAS RECORRENTES (OPÇÃO 2 ATUALIZADA) ---
+
+        // Abrir o seletor de baixa para os 12 meses sempre ativo para maior flexibilidade
         window.marcarComoRecebido = async function(id) {
             if (!operadorNome) {
                 window.openModal('modalIdentificarOperador');
                 return;
             }
 
-            try {
-                const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+            const cli = clientes.find(c => c.id == id);
+            if (!cli) return;
+
+            clientPendingCadastroId = id;
+            document.getElementById('baixaEmpresaNome').innerText = cli.razao;
+
+            const listContainer = document.getElementById('baixaMesesLista');
+            listContainer.innerHTML = '';
+
+            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
+
+            // Renderizar interativamente os 12 meses para baixa (opção flexível e total para o operador)
+            MESES_ANO.forEach((m, idx) => {
+                const estadoMes = statusMeses[m] || "Pendente";
+                const isCobrado = estadoMes === "Cobrado";
+                const isRecebido = estadoMes === "Recebido";
+
+                const label = document.createElement('label');
+                label.style = "display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; cursor: pointer; padding: 6px; border-radius: 6px; transition: background 0.2s;";
                 
-                const idx = clientes.findIndex(c => c.id == id);
-                if (idx !== -1) {
-                    clientes[idx].status = "Recebido";
-                    clientes[idx].ultimaBaixa = dataBaixaFormatada + ' por ' + operadorNome;
-                    clientes[idx].baixadoPor = operadorNome;
-                    atualizarUI();
+                label.onmouseover = () => label.style.background = "#f1f5f9";
+                label.onmouseout = () => label.style.background = "transparent";
+
+                let checkboxHtml = "";
+                let labelExtra = "";
+
+                if (isRecebido) {
+                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked disabled style="width: 17px; height: 17px; cursor: not-allowed;">`;
+                    labelExtra = ` <span style="color: #10b981; font-size: 11px; font-weight: 800; background: #ecfdf5; padding: 2px 6px; border-radius: 4px; margin-left: auto;">PAGO</span>`;
+                } else if (isCobrado) {
+                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked style="width: 17px; height: 17px; cursor: pointer;">`;
+                    labelExtra = ` <span style="color: #a855f7; font-size: 11px; font-weight: 800; background: #f3e8ff; padding: 2px 6px; border-radius: 4px; margin-left: auto;">COBRADO</span>`;
+                } else {
+                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" style="width: 17px; height: 17px; cursor: pointer;">`;
                 }
 
-                if (!id.toString().startsWith('temp_')) {
-                    await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).update({ 
-                        status: "Recebido",
-                        ultimaBaixa: dataBaixaFormatada,
-                        baixadoPor: operadorNome
-                    });
-                }
-                window.showToast(`Empresa marcada como Recebido por ${operadorNome}!`);
-            } catch (error) {
-                console.error("Erro ao marcar como recebido:", error);
+                label.innerHTML = `${checkboxHtml} <span style="flex: 1;">${m}</span> ${labelExtra}`;
+                listContainer.appendChild(label);
+            });
+
+            window.openModal('modalBaixaMultiMeses');
+        };
+
+        // Função executora da mudança de estado e gravação de histórico
+        async function executarBaixaDeMeses(cli, mesesArray) {
+            const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+            
+            const statusMeses = { ...(cli.statusMeses || obterStatusMesesDefault()) };
+            
+            // Pinta os meses selecionados como recebido (Verde)
+            mesesArray.forEach(m => {
+                statusMeses[m] = "Recebido";
+            });
+
+            const statusGeral = calcularStatusGeral(statusMeses);
+
+            // Resumo dinâmico para a tabela
+            const restantesCobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
+            let resumoMeses = cli.meses;
+            if (restantesCobrados.length > 0) {
+                resumoMeses = restantesCobrados.map(m => m.slice(0, 3)).join(', ');
+            } else {
+                resumoMeses = mesesArray.map(m => m.slice(0, 3)).join(', ');
             }
+
+            const updates = {
+                status: statusGeral,
+                statusMeses: statusMeses,
+                meses: resumoMeses,
+                ultimaBaixa: dataBaixaFormatada + ' por ' + operadorNome,
+                baixadoPor: operadorNome
+            };
+
+            // Atualização local instantânea
+            const idx = clientes.findIndex(c => c.id == cli.id);
+            if (idx !== -1) {
+                clientes[idx] = { ...clientes[idx], ...updates };
+                atualizarUI();
+            }
+
+            // Sincronização na nuvem do Firebase
+            if (!cli.id.toString().startsWith('temp_')) {
+                await db.collection('artifacts/' + appId + '/public/data/clientes').doc(cli.id).update(updates);
+                
+                // Grava o registo detalhado no Histórico Global
+                await db.collection('artifacts/' + appId + '/public/data/historicos').add({
+                    dataHora: dataBaixaFormatada,
+                    timestamp: Date.now(),
+                    empresa: cli.razao,
+                    cnpj: cli.cnpj,
+                    operador: operadorNome,
+                    acao: "Baixa / Recebido",
+                    detalhes: "Meses confirmados e baixados: " + mesesArray.join(", ")
+                });
+            }
+
+            window.showToast(`Baixa do mês de ${mesesArray.join(', ')} confirmada por ${operadorNome}!`);
+        }
+
+        // Handlers de ação do modal de baixa multi-meses
+        window.confirmarBaixaTodos = function() {
+            const cli = clientes.find(c => c.id == clientPendingCadastroId);
+            if (!cli) return;
+
+            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
+            // Filtra os meses que não estão recebidos/pagos de modo a pintá-los de verde
+            const naoRecebidos = MESES_ANO.filter(m => statusMeses[m] !== "Recebido");
+
+            executarBaixaDeMeses(cli, naoRecebidos);
+            window.closeModal('modalBaixaMultiMeses');
+        };
+
+        window.confirmarBaixaSelecionados = function() {
+            const cli = clientes.find(c => c.id == clientPendingCadastroId);
+            if (!cli) return;
+
+            const checkboxes = document.querySelectorAll('.baixa-mes-chk');
+            const selecionados = [];
+            checkboxes.forEach(chk => {
+                // Considera apenas faturas novas marcadas que ainda não estavam pagas
+                if (chk.checked && !chk.disabled) {
+                    selecionados.push(chk.value);
+                }
+            });
+
+            if (selecionados.length === 0) {
+                window.showToast("Selecione pelo menos um mês para dar baixa!", "error");
+                return;
+            }
+
+            executarBaixaDeMeses(cli, selecionados);
+            window.closeModal('modalBaixaMultiMeses');
         };
 
         // Reverter status recebido na nuvem
