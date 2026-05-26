@@ -724,6 +724,43 @@
             width: 200px;
         }
 
+        /* Grelha de Meses estruturada em formato 4x3 para o modal Preparar Envio */
+        .months-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .months-selector-container {
+            background: #faf5ff;
+            border: 1px solid #e9d5ff;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .month-chip {
+            background: white;
+            border: 1px solid #d8b4fe;
+            border-radius: 10px;
+            padding: 8px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: #6b21a8;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .month-chip.selected {
+            background: #7c3aed;
+            color: white;
+            border-color: #7c3aed;
+            box-shadow: 0 4px 10px rgba(124, 58, 237, 0.2);
+        }
+
         /* Caixa de Visualização da Mensagem Real */
         .message-preview-box {
             background: #f8fafc;
@@ -1169,7 +1206,7 @@
             <div class="modal-footer" style="margin-top: 25px;">
                 <button class="btn-secondary" style="border: none; background: #f1f5f9; color: #475569;" onclick="closeModal('modalBaixaMultiMeses')">Cancelar</button>
                 <div style="display: flex; gap: 8px;">
-                    <button class="btn-secondary" style="border-color: #10b981; color: #10b981; font-weight: bold;" onclick="confirmarBaixaTodos()">Todos</button>
+                    <button class="btn-secondary" style="border-color: #10b981; color: #10b981; font-weight: bold;" onclick="marcarComoRecebidoTodosCheckboxes()">Selecionar Todos</button>
                     <button class="btn-primary" style="background: #10b981;" onclick="confirmarBaixaSelecionados()">Confirmar Selecionados</button>
                 </div>
             </div>
@@ -1510,7 +1547,8 @@
 
         // ================= SISTEMA DE CONFIRMAÇÃO PERSONALIZADO (Substitui confirm() bloqueado no iFrame) =================
         window.mostrarConfirmacaoCustom = function(titulo, descricao, icone, callback, corBotao = "#7c3aed") {
-            document.getElementById('confirmTitle').innerText = title || "Confirmar";
+            // Correção do Bug de ReferenceError: "title" mudado para o parâmetro correto "titulo"
+            document.getElementById('confirmTitle').innerText = titulo || "Confirmar";
             document.getElementById('confirmDescription').innerText = descricao;
             document.getElementById('confirmIcon').innerText = icone;
             
@@ -1568,7 +1606,8 @@
 
         // Preencher o formulário manual com os dados do cliente para modo edição
         window.abrirEditarCliente = function(id) {
-            const cli = clientes.find(c => c.id == id);
+            // Busca segura convertendo tipos para string
+            const cli = clientes.find(c => c.id.toString() === id.toString());
             if (!cli) return;
 
             currentEditingClientId = id;
@@ -1581,6 +1620,12 @@
             document.getElementById('manualZap').value = cli.whatsapp === "5511999999999" ? "" : cli.whatsapp;
 
             document.getElementById('manualForm').style.display = 'block';
+
+            // UX: Garante que o painel lateral sobe para o topo para que o utilizador veja o formulário aberto
+            const panelBody = document.querySelector('.slide-panel .panel-body');
+            if (panelBody) {
+                panelBody.scrollTop = 0;
+            }
         };
 
         // ================= FLUXO DE IDENTIFICAÇÃO E PRESENÇA =================
@@ -1864,6 +1909,7 @@
                     if(!linha.trim()) continue;
 
                     const cnpjRegex = /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})|(\d{14})/;
+                    // Correção preventiva para usar de forma consistente a variável declarada 'linha'
                     const matchCnpj = linha.match(cnpjRegex);
                     
                     let cnpj = matchCnpj ? matchCnpj[0] : "CNPJ não localizado";
@@ -1956,7 +2002,8 @@
             const razaoNormalizadaNova = razao.trim().toUpperCase();
 
             const existeDuplicado = clientes.some(c => {
-                if (currentEditingClientId && c.id == currentEditingClientId) return false;
+                // Conversão explícita de tipos com .toString() para evitar falhas de validação de duplicados na edição
+                if (currentEditingClientId && c.id.toString() === currentEditingClientId.toString()) return false;
 
                 const cnpjLimpoExistente = c.cnpj ? c.cnpj.replace(/[^0-9]/g, '') : '';
                 const razaoNormalizadaExistente = c.razao ? c.razao.trim().toUpperCase() : '';
@@ -1982,18 +2029,17 @@
                 };
 
                 if (currentEditingClientId) {
-                    // Atuallização local instantânea
-                    const idx = clientes.findIndex(c => c.id == currentEditingClientId);
+                    // Atualização local instantânea
+                    const idx = clientes.findIndex(c => c.id.toString() === currentEditingClientId.toString());
                     if (idx !== -1) {
                         clientes[idx] = { ...clientes[idx], ...clienteDados };
                     }
                     atualizarUI();
 
-                    // Sincronização em segundo plano na nuvem
+                    // Sincronização em segundo plano na nuvem usando await
                     if (!currentEditingClientId.toString().startsWith('temp_')) {
-                        db.collection('artifacts/' + appId + '/public/data/clientes').doc(currentEditingClientId).update(clienteDados)
-                            .then(() => window.showToast('Registo de cliente atualizado com sucesso na nuvem!'))
-                            .catch(err => console.warn(err));
+                        await db.collection('artifacts/' + appId + '/public/data/clientes').doc(currentEditingClientId.toString()).update(clienteDados);
+                        window.showToast('Registo de cliente atualizado com sucesso na nuvem!');
                     }
                 } else {
                     // Adição local instantânea
@@ -2009,9 +2055,8 @@
                     atualizarUI();
 
                     // Adição em segundo plano na nuvem
-                    db.collection('artifacts/' + appId + '/public/data/clientes').add(novoCli)
-                        .then(() => window.showToast('Empresa registada na nuvem com sucesso!'))
-                        .catch(err => console.warn(err));
+                    await db.collection('artifacts/' + appId + '/public/data/clientes').add(novoCli);
+                    window.showToast('Empresa registada na nuvem com sucesso!');
                 }
 
                 document.getElementById('manualRazao').value = '';
@@ -2065,7 +2110,7 @@
 
             let clientesFiltrados = [...clientes];
             
-            // --- ORDENAR DADOS ALFABETICAMENTE PELA RAZÃO SOCIAL ---
+            // --- ORDENAR DADOS ALFABETICAMENTE PELA RAZÃO SOCIAL (CONFORME REQUERIDO) ---
             clientesFiltrados.sort((a, b) => {
                 const razaoA = (a.razao || "").trim().toUpperCase();
                 const razaoB = (b.razao || "").trim().toUpperCase();
@@ -2200,7 +2245,7 @@
                             <button onclick="excluirCliente('${cli.id}')" style="background: none; border: none; color: #ef4444; font-size: 11px; font-weight: 800; cursor: pointer;">EXCLUIR</button>
                         </div>
                     `;
-                    panelClientsList.appendChild(item);
+                    panelClientesList.appendChild(item);
                 });
             }
         };
@@ -2237,51 +2282,45 @@
                 label.onmouseover = () => label.style.background = "#f1f5f9";
                 label.onmouseout = () => label.style.background = "transparent";
 
-                let checkboxHtml = "";
-                let labelExtra = "";
+                // Todas as checkboxes são totalmente ativas e clicáveis a qualquer momento sem restrição ("disabled" removido)
+                const isChecked = isCobrado || isRecebido;
+                const checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" ${isChecked ? 'checked' : ''} style="width: 17px; height: 17px; cursor: pointer;">`;
 
-                if (isRecebido) {
-                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked disabled style="width: 17px; height: 17px; cursor: not-allowed;">`;
-                    labelExtra = ` <span style="color: #10b981; font-size: 11px; font-weight: 800; background: #ecfdf5; padding: 2px 6px; border-radius: 4px; margin-left: auto;">PAGO</span>`;
-                } else if (isCobrado) {
-                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked style="width: 17px; height: 17px; cursor: pointer;">`;
-                    labelExtra = ` <span style="color: #a855f7; font-size: 11px; font-weight: 800; background: #f3e8ff; padding: 2px 6px; border-radius: 4px; margin-left: auto;">COBRADO</span>`;
-                } else {
-                    checkboxHtml = `<input type="checkbox" class="baixa-mes-chk" value="${m}" style="width: 17px; height: 17px; cursor: pointer;">`;
-                }
-
-                label.innerHTML = `${checkboxHtml} <span style="flex: 1;">${m}</span> ${labelExtra}`;
+                label.innerHTML = `${checkboxHtml} <span style="flex: 1;">${m}</span>`;
                 listContainer.appendChild(label);
             });
 
             window.openModal('modalBaixaMultiMeses');
         };
 
+        // Toga todas as checkboxes de meses no modal visual na tela
+        window.marcarComoRecebidoTodosCheckboxes = function() {
+            const checkboxes = document.querySelectorAll('.baixa-mes-chk');
+            checkboxes.forEach(chk => {
+                chk.checked = true;
+            });
+        };
+
         // Função executora da mudança de estado e gravação de histórico
-        async function executarBaixaDeMeses(cli, mesesArray) {
+        async function salvarBaixaMeses(cli, statusMesesNovos) {
             const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
             
-            const statusMeses = { ...(cli.statusMeses || obterStatusMesesDefault()) };
+            const statusGeral = calcularStatusGeral(statusMesesNovos);
+
+            // Resumo de meses cobrados (em Roxo) ou recebidos (em Verde) para guardar no campo legível 'meses'
+            const cobrados = Object.keys(statusMesesNovos).filter(m => statusMesesNovos[m] === "Cobrado");
+            const recebidos = Object.keys(statusMesesNovos).filter(m => statusMesesNovos[m] === "Recebido");
             
-            // Pinta os meses selecionados como recebido (Verde)
-            mesesArray.forEach(m => {
-                statusMeses[m] = "Recebido";
-            });
-
-            const statusGeral = calcularStatusGeral(statusMeses);
-
-            // Resumo dinâmico para a tabela
-            const restantesCobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
-            let resumoMeses = cli.meses;
-            if (restantesCobrados.length > 0) {
-                resumoMeses = restantesCobrados.map(m => m.slice(0, 3)).join(', ');
-            } else {
-                resumoMeses = mesesArray.map(m => m.slice(0, 3)).join(', ');
+            let resumoMeses = "Nenhum";
+            if (cobrados.length > 0) {
+                resumoMeses = cobrados.map(m => m.slice(0, 3)).join(', ');
+            } else if (recebidos.length > 0) {
+                resumoMeses = recebidos.map(m => m.slice(0, 3)).join(', ');
             }
 
             const updates = {
                 status: statusGeral,
-                statusMeses: statusMeses,
+                statusMeses: statusMesesNovos,
                 meses: resumoMeses,
                 ultimaBaixa: dataBaixaFormatada + ' por ' + operadorNome,
                 baixadoPor: operadorNome
@@ -2305,12 +2344,12 @@
                     empresa: cli.razao,
                     cnpj: cli.cnpj,
                     operador: operadorNome,
-                    acao: "Baixa / Recebido",
-                    detalhes: "Meses confirmados e baixados: " + mesesArray.join(", ")
+                    acao: "Atualização de Meses",
+                    detalhes: "Estado dos meses atualizado. Meses Recebidos: " + (recebidos.length > 0 ? recebidos.join(", ") : "Nenhum")
                 });
             }
 
-            window.showToast(`Baixa do mês de ${mesesArray.join(', ')} confirmada por ${operadorNome}!`);
+            window.showToast(`Estado dos meses de ${cli.razao} atualizado por ${operadorNome}!`);
         }
 
         // Handlers de ação do modal de baixa multi-meses
@@ -2318,11 +2357,12 @@
             const cli = clientes.find(c => c.id == clientPendingCadastroId);
             if (!cli) return;
 
-            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
-            // Filtra os meses que não estão recebidos/pagos de modo a pintá-los de verde
-            const naoRecebidos = MESES_ANO.filter(m => statusMeses[m] !== "Recebido");
+            const statusMesesNovos = {};
+            MESES_ANO.forEach(m => {
+                statusMesesNovos[m] = "Recebido";
+            });
 
-            executarBaixaDeMeses(cli, naoRecebidos);
+            salvarBaixaMeses(cli, statusMesesNovos);
             window.closeModal('modalBaixaMultiMeses');
         };
 
@@ -2331,24 +2371,22 @@
             if (!cli) return;
 
             const checkboxes = document.querySelectorAll('.baixa-mes-chk');
-            const selecionados = [];
+            const statusMesesNovos = { ...(cli.statusMeses || obterStatusMesesDefault()) };
+            
             checkboxes.forEach(chk => {
-                // Considera apenas faturas novas marcadas que ainda não estavam pagas
-                if (chk.checked && !chk.disabled) {
-                    selecionados.push(chk.value);
+                const mes = chk.value;
+                if (chk.checked) {
+                    statusMesesNovos[mes] = "Recebido";
+                } else {
+                    statusMesesNovos[mes] = "Pendente";
                 }
             });
 
-            if (selecionados.length === 0) {
-                window.showToast("Selecione pelo menos um mês para dar baixa!", "error");
-                return;
-            }
-
-            executarBaixaDeMeses(cli, selecionados);
+            salvarBaixaMeses(cli, statusMesesNovos);
             window.closeModal('modalBaixaMultiMeses');
         };
 
-        // Reverter status recebido na nuvem
+        // Reverter status recebido na nuvem com modal de confirmação seguro
         window.desfazerRecebido = async function(id) {
             const cli = clientes.find(c => c.id == id);
             if (!cli) return;
@@ -2409,7 +2447,7 @@
 
                         // Sincroniza exclusão na nuvem
                         if (!id.toString().startsWith('temp_')) {
-                            await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).delete();
+                            await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id.toString()).delete();
                         }
                         window.showToast('Cliente removido com sucesso.', 'success');
                     } catch (error) {
