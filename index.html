@@ -890,13 +890,16 @@
     <div class="filter-bar">
         <div class="filter-label-group">
             <div class="current-filter" id="currentFilterLabel">A EXIBIR: TODOS OS CLIENTES</div>
-            <!-- Botões Rápidos de Exportação -->
+            <!-- Botões Rápidos de Exportação e Histórico -->
             <div class="export-actions">
                 <button class="btn-export" onclick="window.print()" title="Imprimir Relatório ou Exportar para PDF">
                     📄 PDF / Imprimir
                 </button>
                 <button class="btn-export" onclick="exportarExcel()" title="Exportar tabela de clientes para arquivo Excel (.CSV)">
                     📥 Excel
+                </button>
+                <button class="btn-export" onclick="abrirModalHistorico()" title="Visualizar histórico de cobranças e baixas">
+                    📜 Histórico
                 </button>
             </div>
         </div>
@@ -1173,6 +1176,63 @@
         </div>
     </div>
 
+    <!-- MODAL DE BAIXA MULTI-MESES -->
+    <div class="modal-overlay" id="modalBaixaMultiMeses" style="z-index: 1080;">
+        <div class="modal-box" style="width: 500px;">
+            <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 28px;">🎯</span>
+                <div>
+                    <h2 style="color: #2e1065; font-weight: 800; font-size: 20px;">Confirmar Recebimento</h2>
+                    <p style="color: #64748b; font-size: 13px;">Selecione quais os meses cobrados desta empresa foram efetivamente pagos.</p>
+                </div>
+            </div>
+            <div style="background: #faf5ff; border: 1px solid #e9d5ff; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
+                <strong style="color: #1e293b; font-size: 14px;" id="baixaEmpresaNome">-</strong>
+            </div>
+            <div class="form-group">
+                <label style="font-size: 11px; font-weight: 800; color: #475569; text-transform: uppercase;">Marque os meses que receberam baixa:</label>
+                <div id="baixaMesesLista" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                    <!-- Checkboxes de meses cobrados injetados via JS -->
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 25px;">
+                <button class="btn-secondary" style="border: none; background: #f1f5f9; color: #475569;" onclick="closeModal('modalBaixaMultiMeses')">Cancelar</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-secondary" style="border-color: #10b981; color: #10b981; font-weight: bold;" onclick="confirmarBaixaTodos()">Todos</button>
+                    <button class="btn-primary" style="background: #10b981;" onclick="confirmarBaixaSelecionados()">Confirmar Selecionados</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE HISTÓRICO DE TRANSAÇÕES -->
+    <div class="modal-overlay" id="modalHistorico" style="z-index: 1090;">
+        <div class="modal-box" style="width: 750px; max-width: 95%;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 24px;">📜</span>
+                    <div>
+                        <h2 style="color: #2e1065; font-weight: 800; font-size: 20px;">HISTÓRICO DE MOVIMENTAÇÕES</h2>
+                        <p style="color: #64748b; font-size: 13px; margin-top: 2px;">Registo em tempo real de todas as cobranças enviadas e baixas efetuadas pela equipa.</p>
+                    </div>
+                </div>
+                <button class="close-panel-btn" onclick="closeModal('modalHistorico')" style="font-size: 24px;">✕</button>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 15px;">
+                <input type="text" id="historicoSearch" class="form-control" placeholder="Filtrar por Empresa, Operador ou Ação..." oninput="filtrarHistoricoInterno()">
+            </div>
+
+            <div style="max-height: 400px; overflow-y: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px;" id="historicoListaContainer">
+                <!-- Itens carregados via JS -->
+            </div>
+
+            <div class="modal-footer" style="justify-content: flex-end; margin-top: 20px;">
+                <button class="btn-secondary" style="background: #e2e8f0; color: #334155; border: none;" onclick="closeModal('modalHistorico')">Fechar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL DE CONFIRMAÇÃO PERSONALIZADO (Substitui o confirm() bloqueado no ambiente de iFrames/Visualizador) -->
     <div class="modal-overlay" id="modalConfirmacao" style="z-index: 1200;">
         <div class="modal-box" style="width: 420px; text-align: center; padding: 30px 25px; border-radius: 24px;">
@@ -1225,6 +1285,7 @@
         // State locais sincronizados em tempo real com localStorage de alta performance
         let clientes = [];
         let modelos = [];
+        let historicos = []; // Guarda histórico de transações da nuvem
         let operadorNome = localStorage.getItem('gestao_extratos_operador') || "";
 
         // Variáveis de Controlo de Fluxo Interno
@@ -1236,11 +1297,43 @@
         let clientPendingCadastroId = null;
         let acaoConfirmadaCallback = null; // Callback para o modal de confirmação personalizado
 
+        // Meses do Ano mapeados
+        const MESES_ANO = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+        
+        // Inicializador padrão para estado individual de cada mês
+        const obterStatusMesesDefault = () => {
+            const obj = {};
+            MESES_ANO.forEach(m => obj[m] = "Pendente");
+            return obj;
+        };
+
+        // Calcula o status consolidado de um cliente baseado na grelha de meses (Opção 2)
+        const calcularStatusGeral = (statusMesesObj) => {
+            const values = Object.values(statusMesesObj);
+            if (values.includes("Cobrado")) {
+                return "Cobrado";
+            }
+            if (values.includes("Recebido")) {
+                return "Recebido";
+            }
+            return "Pendente";
+        };
+
         // --- CARREGAMENTO INICIAL ULTRARRÁPIDO LOCAL (PREVENTIVO CONTRA LATÊNCIAS) ---
         try {
             const localCli = localStorage.getItem('gestao_extratos_clientes');
             if (localCli) {
-                clientes = JSON.parse(localCli);
+                let loadedClientes = JSON.parse(localCli);
+                // Filtra itens de teste antigos permanentes para limpar a base do utilizador de vez
+                clientes = loadedClientes.filter(c => 
+                    c.id !== 101 && c.id !== 102 && c.id !== 103 &&
+                    c.id !== "101" && c.id !== "102" && c.id !== "103" &&
+                    c.razao !== "MARCIO JAROSLAVSKY LTDA" &&
+                    c.razao !== "MARE MOREIRA SERVICOS DE DESIGN LTDA" &&
+                    c.razao !== "MARINALVA VIANA DA SILVA"
+                );
+                // Grava de volta o estado limpo
+                localStorage.setItem('gestao_extratos_clientes', JSON.stringify(clientes));
             }
         } catch(e) { console.error("Erro ao ler localStorage local:", e); }
 
@@ -1559,6 +1652,23 @@
             }, (error) => {
                 console.error("Erro ao sincronizar presenças online:", error);
             });
+
+            // Escuta Histórico de Transações em tempo real (Sincronização sem complexidade - RULE 2)
+            db.collection('artifacts/' + appId + '/public/data/historicos').onSnapshot((snapshot) => {
+                let tempHistoricos = [];
+                snapshot.forEach((doc) => {
+                    tempHistoricos.push({ id: doc.id, ...doc.data() });
+                });
+                // Ordenação em memória descendente pelo timestamp (atendendo à regra de simplicidade de query)
+                tempHistoricos.sort((a, b) => b.timestamp - a.timestamp);
+                historicos = tempHistoricos;
+                
+                if (document.getElementById('modalHistorico').style.display === 'flex') {
+                    renderHistoricoList();
+                }
+            }, (error) => {
+                console.error("Erro ao sincronizar histórico de movimentações:", error);
+            });
         }
 
         async function popularModelosDemonstracao() {
@@ -1685,15 +1795,14 @@
             let ignoradosDuplicados = 0;
 
             try {
-                for (const linha of linhas) {
-                    if(!linha.trim()) continue;
+                for (const inline of linhas) {
+                    if(!inline.trim()) continue;
 
                     const cnpjRegex = /(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})|(\d{14})/;
-                    // CORREÇÃO CRÍTICA DO ERRO DE IMPORTAÇÃO: alterado de "inline.match" para "linha.match"
-                    const matchCnpj = linha.match(cnpjRegex);
+                    const matchCnpj = inline.match(cnpjRegex);
                     
                     let cnpj = matchCnpj ? matchCnpj[0] : "CNPJ não localizado";
-                    let razao = linha.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
+                    let razao = inline.replace(cnpj, '').replace(/[\r\n]+/g, ' ').trim();
                     
                     if (razao.length < 3) {
                         razao = "Empresa Importada #" + (clientes.length + 1);
@@ -1715,8 +1824,10 @@
 
                     if (existeDuplicado) {
                         ignoradosDuplicados++;
-                        continue; // Salta esta linha, prevenindo registos duplicados
+                        continue; 
                     }
+
+                    const statusMesesDefault = obterStatusMesesDefault();
 
                     const novoCliente = {
                         razao: razao,
@@ -1725,7 +1836,8 @@
                         whatsapp: "5511999999999", 
                         meses: "Nenhum",
                         ultimaCobranca: "Nunca",
-                        status: "Pendente"
+                        status: "Pendente",
+                        statusMeses: statusMesesDefault // Grelha de Meses Inicializado em branco
                     };
 
                     // --- ATUALIZAÇÃO LOCAL INSTANTÂNEA ---
@@ -1753,7 +1865,7 @@
                 window.toggleSlidePanel(false); 
 
                 if (ignoradosDuplicados > 0) {
-                    window.showToast(`${adicionados} novos clientes processados. ${ignoradosDuplicados} registos duplicados foram ignorados.`);
+                    window.showToast(`${adicionados} novos clientes processados. ${ignoradosDuplicados} registos duplicados ignorados.`);
                 } else {
                     window.showToast(`${adicionados} clientes processados e salvos localmente e na nuvem!`);
                 }
@@ -1779,7 +1891,6 @@
             const razaoNormalizadaNova = razao.trim().toUpperCase();
 
             const existeDuplicado = clientes.some(c => {
-                // Se for edição, ignora a própria linha que está a ser alterada
                 if (currentEditingClientId && c.id == currentEditingClientId) return false;
 
                 const cnpjLimpoExistente = c.cnpj ? c.cnpj.replace(/[^0-9]/g, '') : '';
@@ -1797,6 +1908,7 @@
             }
 
             try {
+                const statusMesesDefault = obterStatusMesesDefault();
                 const clienteDados = {
                     razao: razao,
                     cnpj: cnpj || "Isento/Não Informado",
@@ -1805,7 +1917,7 @@
                 };
 
                 if (currentEditingClientId) {
-                    // Atuallização local instantânea
+                    // Atualização local instantânea
                     const idx = clientes.findIndex(c => c.id == currentEditingClientId);
                     if (idx !== -1) {
                         clientes[idx] = { ...clientes[idx], ...clienteDados };
@@ -1825,7 +1937,8 @@
                         ...clienteDados,
                         meses: "Nenhum",
                         ultimaCobranca: "Nunca",
-                        status: "Pendente" // Começa como Pendente para exibir tracinho se nada for cobrado
+                        status: "Pendente",
+                        statusMeses: statusMesesDefault
                     };
                     clientes.push({ id: tempId, ...novoCli });
                     atualizarUI();
@@ -1908,7 +2021,7 @@
                     const tr = document.createElement('tr');
                     tr.className = 'company-row';
 
-                    // === NOVA REGRA DE STATUS GERAL DO CARD TODOS COM CONTROLO DE HISTÓRICO DE OPERADORES ===
+                    // === CONTROLO VISUAL DO STATUS CONSISTENTE (Opção 2) ===
                     let statusGeralCell = "—"; 
                     if (cli.status === "Cobrado") {
                         statusGeralCell = `<span class="badge-type" style="background: #eff6ff; color: #1d4ed8; font-weight:800; border: 1px solid #dbeafe;">Cobrado</span>`;
@@ -1916,7 +2029,7 @@
                         statusGeralCell = `<span class="badge-type" style="background: #ecfdf5; color: #047857; font-weight:800; border: 1px solid #a7f3d0;">Recebido</span>`;
                     }
 
-                    // Detalhe de Rastreabilidade Amigável
+                    // Detalhe de Rastreabilidade Amigável no Histórico
                     let historicoCobranca = "—";
                     if (cli.ultimaCobranca && cli.ultimaCobranca !== "Nunca") {
                         historicoCobranca = cli.ultimaCobranca;
@@ -1926,8 +2039,30 @@
                     }
 
                     if (cli.status === "Recebido" && cli.ultimaBaixa) {
-                        historicoCobranca += `<br><span style="color: #059669; font-size:12px; font-weight:700;">Baixado: ${cli.ultimaBaixa}</span>`;
+                        historicoCobranca += `<br><span style="color: #059669; font-size:11px; font-weight:700;">Baixado: ${cli.ultimaBaixa}</span>`;
                     }
+
+                    // --- CONSTRUÇÃO DA GRELHA VISUAL DE 12 MESES (OPÇÃO 2) ---
+                    const statusMeses = cli.statusMeses || obterStatusMesesDefault();
+                    const iniciaisMeses = {
+                        "Janeiro": "J", "Fevereiro": "F", "Março": "M", "Abril": "A", "Maio": "M", "Junho": "J",
+                        "Julho": "J", "Agosto": "A", "Setembro": "S", "Outubro": "O", "Novembro": "N", "Dezembro": "D"
+                    };
+
+                    let grelhaMesesHtml = '<div style="display: flex; gap: 4px; flex-wrap: wrap; max-width: 170px;">';
+                    MESES_ANO.forEach(m => {
+                        const estadoMes = statusMeses[m] || "Pendente";
+                        let styleDot = "background: #f1f5f9; color: #94a3b8; border: 1px solid #e2e8f0;"; // Cinza / Pendente
+                        
+                        if (estadoMes === "Cobrado") {
+                            styleDot = "background: #c084fc; color: white; border: 1px solid #a855f7;"; // Roxo / Cobrado
+                        } else if (estadoMes === "Recebido") {
+                            styleDot = "background: #34d399; color: white; border: 1px solid #10b981;"; // Verde / Recebido
+                        }
+
+                        grelhaMesesHtml += `<span style="width: 19px; height: 19px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 800; ${styleDot}" title="${m}: ${estadoMes}">${iniciaisMeses[m]}</span>`;
+                    });
+                    grelhaMesesHtml += '</div>';
 
                     const isCobrado = (cli.status === "Cobrado" || cli.status === "Recebido");
                     const isRecebido = (cli.status === "Recebido");
@@ -1952,12 +2087,10 @@
                             <div style="font-size: 12px; color: #64748b; margin-top: 2px;">${cli.cnpj}</div>
                         </td>
                         <td>
-                            <span style="color: #7c3aed; font-weight: 700; background: #faf5ff; padding: 4px 10px; border-radius: 8px; border: 1px solid #f3e8ff;">
-                                📅 ${cli.meses}
-                            </span>
+                            ${grelhaMesesHtml}
                         </td>
                         <td>
-                            <div style="font-size: 13px; color: #475569; line-height:1.4;">${historicoCobranca}</div>
+                            <div style="font-size: 12px; color: #475569; line-height:1.4;">${historicoCobranca}</div>
                         </td>
                         <td>
                             ${statusGeralCell}
@@ -1993,58 +2126,181 @@
             }
         };
 
-        // Dar baixa / Marcar como recebido com histórico de operador
+        // --- SISTEMA INTELIGENTE DE CONFIRMAÇÃO DE COBRANÇAS RECORRENTES (OPÇÃO 2) ---
+
+        // Dar baixa de meses / Marcar como recebido
         window.marcarComoRecebido = async function(id) {
             if (!operadorNome) {
                 window.openModal('modalIdentificarOperador');
                 return;
             }
 
-            try {
-                const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
-                
-                const idx = clientes.findIndex(c => c.id == id);
-                if (idx !== -1) {
-                    clientes[idx].status = "Recebido";
-                    clientes[idx].ultimaBaixa = dataBaixaFormatada + ' por ' + operadorNome;
-                    clientes[idx].baixadoPor = operadorNome;
-                    atualizarUI();
-                }
+            const cli = clientes.find(c => c.id == id);
+            if (!cli) return;
 
-                if (!id.toString().startsWith('temp_')) {
-                    await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).update({ 
-                        status: "Recebido",
-                        ultimaBaixa: dataBaixaFormatada,
-                        baixadoPor: operadorNome
-                    });
-                }
-                window.showToast(`Empresa marcada como Recebido por ${operadorNome}!`);
-            } catch (error) {
-                console.error("Erro ao marcar como recebido:", error);
+            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
+            // Filtra os meses que estão ativamente cobrados (em roxo)
+            const cobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
+
+            if (cobrados.length === 0) {
+                window.showToast("Nenhum mês está atualmente marcado como cobrado para esta empresa.", "error");
+                return;
             }
+
+            if (cobrados.length === 1) {
+                // Apenas um mês ativo, faz a baixa direta para verde
+                executarBaixaDeMeses(cli, cobrados);
+            } else {
+                // Pergunta de forma visual e intuitiva no modal inteligente de Multi-Meses
+                clientPendingCadastroId = id; // reusa a variável de controle para o ID temporário
+                document.getElementById('baixaEmpresaNome').innerText = cli.razao;
+                
+                const listContainer = document.getElementById('baixaMesesLista');
+                listContainer.innerHTML = '';
+                
+                cobrados.forEach(m => {
+                    const label = document.createElement('label');
+                    label.style = "display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; cursor: pointer;";
+                    label.innerHTML = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked style="width: 17px; height: 17px; cursor: pointer;"> ${m}`;
+                    listContainer.appendChild(label);
+                });
+
+                window.openModal('modalBaixaMultiMeses');
+            }
+        };
+
+        // Função executora da mudança de estado e gravação de histórico
+        async function executarBaixaDeMeses(cli, mesesArray) {
+            const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+            
+            const statusMeses = { ...(cli.statusMeses || obterStatusMesesDefault()) };
+            
+            // Pinta os meses selecionados como recebido (Verde)
+            mesesArray.forEach(m => {
+                statusMeses[m] = "Recebido";
+            });
+
+            const statusGeral = calcularStatusGeral(statusMeses);
+
+            // Resumo dinâmico para a tabela
+            const restantesCobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
+            let resumoMeses = cli.meses;
+            if (restantesCobrados.length > 0) {
+                resumoMeses = restantesCobrados.map(m => m.slice(0, 3)).join(', ');
+            } else {
+                resumoMeses = mesesArray.map(m => m.slice(0, 3)).join(', ');
+            }
+
+            const updates = {
+                status: statusGeral,
+                statusMeses: statusMeses,
+                meses: resumoMeses,
+                ultimaBaixa: dataBaixaFormatada + ' por ' + operadorNome,
+                baixadoPor: operadorNome
+            };
+
+            // Atualização local instantânea
+            const idx = clientes.findIndex(c => c.id == cli.id);
+            if (idx !== -1) {
+                clientes[idx] = { ...clientes[idx], ...updates };
+                atualizarUI();
+            }
+
+            // Sincronização na nuvem do Firebase
+            if (!cli.id.toString().startsWith('temp_')) {
+                await db.collection('artifacts/' + appId + '/public/data/clientes').doc(cli.id).update(updates);
+                
+                // Grava o registo detalhado no Histórico Global
+                await db.collection('artifacts/' + appId + '/public/data/historicos').add({
+                    dataHora: dataBaixaFormatada,
+                    timestamp: Date.now(),
+                    empresa: cli.razao,
+                    cnpj: cli.cnpj,
+                    operador: operadorNome,
+                    acao: "Baixa / Recebido",
+                    detalhes: "Meses confirmados e baixados: " + mesesArray.join(", ")
+                });
+            }
+
+            window.showToast(`Baixa do mês de ${mesesArray.join(', ')} confirmada por ${operadorNome}!`);
+        }
+
+        // Handlers de ação do modal de baixa multi-meses
+        window.confirmarBaixaTodos = function() {
+            const cli = clientes.find(c => c.id == clientPendingCadastroId);
+            if (!cli) return;
+
+            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
+            const cobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
+
+            executarBaixaDeMeses(cli, cobrados);
+            window.closeModal('modalBaixaMultiMeses');
+        };
+
+        window.confirmarBaixaSelecionados = function() {
+            const cli = clientes.find(c => c.id == clientPendingCadastroId);
+            if (!cli) return;
+
+            const checkboxes = document.querySelectorAll('.baixa-mes-chk');
+            const selecionados = [];
+            checkboxes.forEach(chk => {
+                if (chk.checked) selecionados.push(chk.value);
+            });
+
+            if (selecionados.length === 0) {
+                window.showToast("Selecione pelo menos um mês cobrado para dar baixa!", "error");
+                return;
+            }
+
+            executarBaixaDeMeses(cli, selecionados);
+            window.closeModal('modalBaixaMultiMeses');
         };
 
         // Reverter status recebido na nuvem
         window.desfazerRecebido = async function(id) {
-            try {
-                const idx = clientes.findIndex(c => c.id == id);
-                if (idx !== -1) {
-                    clientes[idx].status = "Cobrado";
-                    clientes[idx].ultimaBaixa = "";
-                    clientes[idx].baixadoPor = "";
-                    atualizarUI();
+            const cli = clientes.find(c => c.id == id);
+            if (!cli) return;
+
+            window.mostrarConfirmacaoCustom(
+                'Desfazer Recebimento',
+                'Deseja realmente reverter os meses pagos de volta para o estado de Cobrança em aberto?',
+                '🔄',
+                async () => {
+                    try {
+                        const statusMeses = { ...(cli.statusMeses || obterStatusMesesDefault()) };
+                        
+                        // Retorna os recebidos para cobrados (Roxo)
+                        Object.keys(statusMeses).forEach(m => {
+                            if (statusMeses[m] === "Recebido") {
+                                statusMeses[m] = "Cobrado";
+                            }
+                        });
+
+                        const statusGeral = calcularStatusGeral(statusMeses);
+
+                        const idx = clientes.findIndex(c => c.id == id);
+                        if (idx !== -1) {
+                            clientes[idx].status = statusGeral;
+                            clientes[idx].statusMeses = statusMeses;
+                            clientes[idx].ultimaBaixa = "";
+                            clientes[idx].baixadoPor = "";
+                            atualizarUI();
+                        }
+
+                        if (!id.toString().startsWith('temp_')) {
+                            await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).update({ 
+                                status: statusGeral,
+                                statusMeses: statusMeses,
+                                ultimaBaixa: "",
+                                baixadoPor: ""
+                            });
+                        }
+                        window.showToast("Status revertido com sucesso!");
+                    } catch (error) {
+                        console.error("Erro ao desfazer recebido:", error);
+                    }
                 }
-                if (!id.toString().startsWith('temp_')) {
-                    await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).update({ 
-                        status: "Cobrado",
-                        ultimaBaixa: "",
-                        baixadoPor: ""
-                    });
-                }
-                window.showToast("Status revertido para Cobrado!");
-            } catch (error) {
-                console.error("Erro ao desfazer recebido:", error);
-            }
+            );
         };
 
         // Excluir cliente de forma segura do Firestore (Usando modal de confirmação personalizado)
@@ -2055,8 +2311,8 @@
                 '🗑️',
                 async () => {
                     try {
-                        // Remove localmente primeiro
-                        clientes = clientes.filter(c => c.id !== id);
+                        // Remove localmente primeiro (Conversão para string para comparação estável)
+                        clientes = clientes.filter(c => c.id.toString() !== id.toString());
                         atualizarUI();
 
                         // Sincroniza exclusão na nuvem
@@ -2071,6 +2327,64 @@
                 },
                 "#ef4444"
             );
+        };
+
+        // ================= SISTEMA DO HISTÓRICO GLOBAL (TELA DO MODAL) =================
+
+        // Abrir o modal de histórico e carregar dados
+        window.abrirModalHistorico = function() {
+            window.openModal('modalHistorico');
+            renderHistoricoList();
+        };
+
+        // Renderização amigável dos registos de histórico (RULE 2 - ordenado localmente)
+        window.renderHistoricoList = function() {
+            const container = document.getElementById('historicoListaContainer');
+            container.innerHTML = '';
+            
+            const filterText = document.getElementById('historicoSearch').value.toUpperCase();
+            
+            let filtrados = historicos;
+            if (filterText) {
+                filtrados = historicos.filter(log => {
+                    const empresa = log.empresa ? log.empresa.toUpperCase() : "";
+                    const operador = log.operador ? log.operador.toUpperCase() : "";
+                    const acao = log.acao ? log.acao.toUpperCase() : "";
+                    const detalhes = log.detalhes ? log.detalhes.toUpperCase() : "";
+                    return empresa.includes(filterText) || operador.includes(filterText) || acao.includes(filterText) || detalhes.includes(filterText);
+                });
+            }
+
+            if (filtrados.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 30px; font-weight: 700;">Nenhum registo de histórico encontrado.</div>';
+                return;
+            }
+
+            filtrados.forEach(log => {
+                const isCobranca = log.acao === "Cobrança Enviada";
+                const borderCol = isCobranca ? '#a855f7' : '#10b981';
+                
+                const div = document.createElement('div');
+                div.style = `background: white; border-radius: 12px; border: 1px solid #e2e8f0; border-left: 6px solid ${borderCol}; padding: 15px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);`;
+                div.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong style="color: #1e293b; font-size: 14px;">${log.empresa}</strong>
+                        <span style="color: #64748b; font-size: 11px; background: #f1f5f9; padding: 3px 8px; border-radius: 12px; font-weight: 700;">${log.dataHora}</span>
+                    </div>
+                    <div style="color: #475569; font-size: 13px; margin-bottom: 6px;">
+                        <strong>Ação:</strong> <span style="color: ${borderCol}; font-weight: 800;">${log.acao}</span> | 
+                        <strong>Operador:</strong> <span style="font-weight: 700; color: #1e293b;">${log.operador}</span>
+                    </div>
+                    <div style="color: #64748b; font-size: 12px; background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid #f1f5f9;">
+                        ${log.detalhes}
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        };
+
+        window.filtrarHistoricoInterno = function() {
+            renderHistoricoList();
         };
 
         // ================= FLUXO DE SEGURANÇA E VALIDAÇÕES DO WHATSAPP =================
@@ -2271,8 +2585,18 @@
 
             try {
                 const dataCobrancaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+                
+                // Atualiza o estado individual dos meses para "Cobrado" (Roxo)
+                const statusMeses = { ...(selectedClientForSend.statusMeses || obterStatusMesesDefault()) };
+                selectedMonths.forEach(m => {
+                    statusMeses[m] = "Cobrado";
+                });
+
+                const statusGeral = calcularStatusGeral(statusMeses);
+
                 const updates = {
-                    status: "Cobrado",
+                    status: statusGeral,
+                    statusMeses: statusMeses,
                     ultimaCobranca: dataCobrancaFormatada,
                     cobradoPor: operadorNome
                 };
@@ -2293,6 +2617,17 @@
                 // Sincronização em segundo plano na nuvem
                 if (!selectedClientForSend.id.toString().startsWith('temp_')) {
                     await db.collection('artifacts/' + appId + '/public/data/clientes').doc(selectedClientForSend.id).update(updates);
+                    
+                    // Grava o histórico detalhado do envio de cobrança
+                    await db.collection('artifacts/' + appId + '/public/data/historicos').add({
+                        dataHora: dataCobrancaFormatada,
+                        timestamp: Date.now(),
+                        empresa: selectedClientForSend.razao,
+                        cnpj: selectedClientForSend.cnpj,
+                        operador: operadorNome,
+                        acao: "Cobrança Enviada",
+                        detalhes: "Meses cobrados: " + selectedMonths.join(", ")
+                    });
                 }
 
                 const linkHigienizado = sanitizeWhatsAppLink(selectedClientForSend.whatsapp);
