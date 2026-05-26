@@ -1763,7 +1763,6 @@
             }
         };
 
-        // Excluir Modelo com diálogo personalizado
         window.excluirModelo = function(id) {
             window.mostrarConfirmacaoCustom(
                 'Remover Modelo',
@@ -1917,7 +1916,7 @@
                 };
 
                 if (currentEditingClientId) {
-                    // Atualização local instantânea
+                    // Atuallização local instantânea
                     const idx = clientes.findIndex(c => c.id == currentEditingClientId);
                     if (idx !== -1) {
                         clientes[idx] = { ...clientes[idx], ...clienteDados };
@@ -2126,134 +2125,35 @@
             }
         };
 
-        // --- SISTEMA INTELIGENTE DE CONFIRMAÇÃO DE COBRANÇAS RECORRENTES (OPÇÃO 2) ---
-
-        // Dar baixa de meses / Marcar como recebido
+        // Dar baixa / Marcar como recebido com histórico de operador
         window.marcarComoRecebido = async function(id) {
             if (!operadorNome) {
                 window.openModal('modalIdentificarOperador');
                 return;
             }
 
-            const cli = clientes.find(c => c.id == id);
-            if (!cli) return;
-
-            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
-            // Filtra os meses que estão ativamente cobrados (em roxo)
-            const cobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
-
-            if (cobrados.length === 0) {
-                window.showToast("Nenhum mês está atualmente marcado como cobrado para esta empresa.", "error");
-                return;
-            }
-
-            if (cobrados.length === 1) {
-                // Apenas um mês ativo, faz a baixa direta para verde
-                executarBaixaDeMeses(cli, cobrados);
-            } else {
-                // Pergunta de forma visual e intuitiva no modal inteligente de Multi-Meses
-                clientPendingCadastroId = id; // reusa a variável de controle para o ID temporário
-                document.getElementById('baixaEmpresaNome').innerText = cli.razao;
+            try {
+                const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
                 
-                const listContainer = document.getElementById('baixaMesesLista');
-                listContainer.innerHTML = '';
-                
-                cobrados.forEach(m => {
-                    const label = document.createElement('label');
-                    label.style = "display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; cursor: pointer;";
-                    label.innerHTML = `<input type="checkbox" class="baixa-mes-chk" value="${m}" checked style="width: 17px; height: 17px; cursor: pointer;"> ${m}`;
-                    listContainer.appendChild(label);
-                });
+                const idx = clientes.findIndex(c => c.id == id);
+                if (idx !== -1) {
+                    clientes[idx].status = "Recebido";
+                    clientes[idx].ultimaBaixa = dataBaixaFormatada + ' por ' + operadorNome;
+                    clientes[idx].baixadoPor = operadorNome;
+                    atualizarUI();
+                }
 
-                window.openModal('modalBaixaMultiMeses');
+                if (!id.toString().startsWith('temp_')) {
+                    await db.collection('artifacts/' + appId + '/public/data/clientes').doc(id).update({ 
+                        status: "Recebido",
+                        ultimaBaixa: dataBaixaFormatada,
+                        baixadoPor: operadorNome
+                    });
+                }
+                window.showToast(`Empresa marcada como Recebido por ${operadorNome}!`);
+            } catch (error) {
+                console.error("Erro ao marcar como recebido:", error);
             }
-        };
-
-        // Função executora da mudança de estado e gravação de histórico
-        async function executarBaixaDeMeses(cli, mesesArray) {
-            const dataBaixaFormatada = new Date().toLocaleDateString('pt-BR') + ' às ' + new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
-            
-            const statusMeses = { ...(cli.statusMeses || obterStatusMesesDefault()) };
-            
-            // Pinta os meses selecionados como recebido (Verde)
-            mesesArray.forEach(m => {
-                statusMeses[m] = "Recebido";
-            });
-
-            const statusGeral = calcularStatusGeral(statusMeses);
-
-            // Resumo dinâmico para a tabela
-            const restantesCobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
-            let resumoMeses = cli.meses;
-            if (restantesCobrados.length > 0) {
-                resumoMeses = restantesCobrados.map(m => m.slice(0, 3)).join(', ');
-            } else {
-                resumoMeses = mesesArray.map(m => m.slice(0, 3)).join(', ');
-            }
-
-            const updates = {
-                status: statusGeral,
-                statusMeses: statusMeses,
-                meses: resumoMeses,
-                ultimaBaixa: dataBaixaFormatada + ' por ' + operadorNome,
-                baixadoPor: operadorNome
-            };
-
-            // Atualização local instantânea
-            const idx = clientes.findIndex(c => c.id == cli.id);
-            if (idx !== -1) {
-                clientes[idx] = { ...clientes[idx], ...updates };
-                atualizarUI();
-            }
-
-            // Sincronização na nuvem do Firebase
-            if (!cli.id.toString().startsWith('temp_')) {
-                await db.collection('artifacts/' + appId + '/public/data/clientes').doc(cli.id).update(updates);
-                
-                // Grava o registo detalhado no Histórico Global
-                await db.collection('artifacts/' + appId + '/public/data/historicos').add({
-                    dataHora: dataBaixaFormatada,
-                    timestamp: Date.now(),
-                    empresa: cli.razao,
-                    cnpj: cli.cnpj,
-                    operador: operadorNome,
-                    acao: "Baixa / Recebido",
-                    detalhes: "Meses confirmados e baixados: " + mesesArray.join(", ")
-                });
-            }
-
-            window.showToast(`Baixa do mês de ${mesesArray.join(', ')} confirmada por ${operadorNome}!`);
-        }
-
-        // Handlers de ação do modal de baixa multi-meses
-        window.confirmarBaixaTodos = function() {
-            const cli = clientes.find(c => c.id == clientPendingCadastroId);
-            if (!cli) return;
-
-            const statusMeses = cli.statusMeses || obterStatusMesesDefault();
-            const cobrados = Object.keys(statusMeses).filter(m => statusMeses[m] === "Cobrado");
-
-            executarBaixaDeMeses(cli, cobrados);
-            window.closeModal('modalBaixaMultiMeses');
-        };
-
-        window.confirmarBaixaSelecionados = function() {
-            const cli = clientes.find(c => c.id == clientPendingCadastroId);
-            if (!cli) return;
-
-            const checkboxes = document.querySelectorAll('.baixa-mes-chk');
-            const selecionados = [];
-            checkboxes.forEach(chk => {
-                if (chk.checked) selecionados.push(chk.value);
-            });
-
-            if (selecionados.length === 0) {
-                window.showToast("Selecione pelo menos um mês cobrado para dar baixa!", "error");
-                return;
-            }
-
-            executarBaixaDeMeses(cli, selecionados);
-            window.closeModal('modalBaixaMultiMeses');
         };
 
         // Reverter status recebido na nuvem
